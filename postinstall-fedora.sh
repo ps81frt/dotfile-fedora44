@@ -59,7 +59,8 @@ dnf_install_safe \
     flex bison bc cpio kmod gawk dkms \
     libudev-devel pciutils-devel llvm \
     zstd lzop sassc xclip xsel nodejs npm \
-    unrar fastfetch gnome-shell-extension-dash-to-dock
+    unrar fastfetch gnome-shell-extension-dash-to-dock \
+    redhat-fonts
 
 print_info "Installation de micro..."
 if command -v micro &>/dev/null; then
