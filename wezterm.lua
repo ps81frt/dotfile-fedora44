@@ -8,6 +8,8 @@ local config = wezterm.config_builder()
 config.color_scheme = "Gruvbox dark, medium (base16)"
 config.window_background_opacity = 0.92
 config.macos_window_background_blur = 20
+config.window_decorations = "INTEGRATED_BUTTONS|RESIZE"
+
 
 config.window_padding = {
 	left = 10,
