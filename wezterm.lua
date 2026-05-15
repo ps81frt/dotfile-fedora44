@@ -20,6 +20,7 @@ config.window_padding = {
 -- 🔤 FONT
 -- =========================
 config.font = wezterm.font_with_fallback({
+	"redhat-fonts"
 	"Hack Nerd Font Mono",
 	"JetBrains Mono",
 })
