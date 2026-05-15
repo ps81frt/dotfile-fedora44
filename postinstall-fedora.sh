@@ -1,16 +1,18 @@
 #!/bin/bash
 # postinstall-fedora.sh - Script d'optimisation post-installation Fedora
+# Adapté depuis la version Ubuntu/Debian
 
-set -e
+# Pas de set -e : dnf5 retourne une erreur si un paquet est déjà installé,
+# ce qui tuerait le script. On gère les erreurs manuellement.
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-print_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
+print_info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+print_ok()      { echo -e "${GREEN}[OK]${NC}   $1"; }
 
 if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}[ERROR] Ce script doit être exécuté en tant que root (sudo)${NC}"
@@ -19,11 +21,25 @@ fi
 
 print_info "Début de la post-installation Fedora..."
 
+# Installe un paquet seulement s'il n'est pas déjà présent
+dnf_install_safe() {
+    for pkg in "$@"; do
+        if dnf list --installed "$pkg" &>/dev/null 2>&1; then
+            print_ok "$pkg déjà installé."
+        else
+            print_info "Installation : $pkg"
+            dnf install -y "$pkg" 2>/dev/null \
+                && print_ok "$pkg" \
+                || print_warning "$pkg : non disponible, ignoré."
+        fi
+    done
+}
+
 # ============================================================
 # MISE À JOUR SYSTÈME
 # ============================================================
-dnf upgrade -y
-dnf autoremove -y
+dnf upgrade -y || true
+dnf autoremove -y || true
 
 # ============================================================
 # RPM FUSION (codecs, extras)
@@ -31,29 +47,35 @@ dnf autoremove -y
 print_info "Activation de RPM Fusion..."
 dnf install -y \
     "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" \
-    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm" || true
+    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm" \
+    2>/dev/null || print_warning "RPM Fusion déjà installé ou indisponible, ignoré."
 
 # ============================================================
-# PAQUETS PRINCIPAUX
+# PAQUETS PRINCIPAUX (un par un pour éviter l'échec global dnf5)
 # ============================================================
 print_info "Installation des paquets..."
-dnf install -y \
+dnf_install_safe \
     curl wget git make gcc gcc-c++ kernel-devel \
-    openssl-devel ca-certificates gnupg2 lsb-release unzip zip \
+    openssl-devel ca-certificates gnupg2 unzip zip \
     gzip tar vim neovim htop ncdu tree tmux screen \
     net-tools nmap ufw fail2ban openssh-server rsync jq fzf \
     ripgrep fd-find bat eza duf p7zip strace ltrace \
     lsof iotop nethogs iftop sqlite python3 python3-pip python3-virtualenv \
-    neofetch unrar perl-Fedora-VSPackages autoconf \
-    ncurses-devel elfutils-libelf-devel openssl-devel \
+    autoconf ncurses-devel elfutils-libelf-devel \
     flex bison bc cpio kmod gawk dkms \
-    libudev-devel pciutils-devel libiberty-devel llvm \
-    zstd lzop sassc xclip xsel nodejs npm
+    libudev-devel pciutils-devel llvm \
+    zstd lzop sassc xclip xsel nodejs npm \
+    unrar fastfetch
 
 # micro - pas de snap sur Fedora, on prend le binaire officiel
 print_info "Installation de micro..."
-curl -fsSL https://getmic.ro | bash
-mv micro /usr/local/bin/micro || true
+if command -v micro &>/dev/null; then
+    print_ok "micro déjà installé."
+else
+    curl -fsSL https://getmic.ro | bash && mv micro /usr/local/bin/micro \
+        && print_ok "micro installé." \
+        || print_warning "micro : échec de l'installation."
+fi
 
 # ============================================================
 # NERD FONT
@@ -61,34 +83,38 @@ mv micro /usr/local/bin/micro || true
 print_info "Installation de HackNerdFont..."
 mkdir -p /usr/local/share/fonts
 curl -fsSL https://github.com/ryanoasis/nerd-fonts/raw/master/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf \
-    -o /usr/local/share/fonts/HackNerdFontMono-Regular.ttf
-fc-cache -fv
+    -o /usr/local/share/fonts/HackNerdFontMono-Regular.ttf && fc-cache -fv \
+    || print_warning "HackNerdFont : échec du téléchargement."
 
 # ============================================================
 # WEZTERM via COPR
 # ============================================================
 print_info "Installation de WezTerm..."
-dnf copr enable -y wezfurlong/wezterm-nightly || \
-    dnf copr enable -y wez/wezterm || true
-dnf install -y wezterm || \
-    (print_info "COPR échoué, tentative via flatpak..." && \
-     flatpak install -y flathub org.wezfurlong.wezterm 2>/dev/null || true)
+if command -v wezterm &>/dev/null; then
+    print_ok "WezTerm déjà installé."
+else
+    dnf copr enable -y wezfurlong/wezterm-nightly 2>/dev/null || \
+        dnf copr enable -y wez/wezterm 2>/dev/null || true
+    dnf install -y wezterm 2>/dev/null || \
+        (print_warning "COPR WezTerm échoué, tentative flatpak..." && \
+         flatpak install -y flathub org.wezfurlong.wezterm 2>/dev/null || \
+         print_warning "WezTerm non installé.")
+fi
 
 WEZTERM_CONFIG_URL="https://raw.githubusercontent.com/ps81frt/dotfile-ubuntu/refs/heads/main/wezterm.lua"
-curl -fsSL "$WEZTERM_CONFIG_URL" -o /tmp/wezterm.lua
+curl -fsSL "$WEZTERM_CONFIG_URL" -o /tmp/wezterm.lua 2>/dev/null && {
+    mkdir -p /root/.config/wezterm
+    cp /tmp/wezterm.lua /root/.config/wezterm/wezterm.lua
 
-mkdir -p /root/.config/wezterm
-cp /tmp/wezterm.lua /root/.config/wezterm/wezterm.lua
-
-while IFS=: read -r username _ uid _ _ homedir _; do
-    if [[ $uid -ge 1000 && $uid -lt 65534 && -d "$homedir" ]]; then
-        mkdir -p "$homedir/.config/wezterm"
-        cp /tmp/wezterm.lua "$homedir/.config/wezterm/wezterm.lua"
-        chown -R "$username":"$username" "$homedir/.config/wezterm"
-    fi
-done </etc/passwd
-
-rm -f /tmp/wezterm.lua
+    while IFS=: read -r username _ uid _ _ homedir _; do
+        if [[ $uid -ge 1000 && $uid -lt 65534 && -d "$homedir" ]]; then
+            mkdir -p "$homedir/.config/wezterm"
+            cp /tmp/wezterm.lua "$homedir/.config/wezterm/wezterm.lua"
+            chown -R "$username":"$username" "$homedir/.config/wezterm"
+        fi
+    done </etc/passwd
+    rm -f /tmp/wezterm.lua
+} || print_warning "wezterm.lua : téléchargement échoué."
 
 # ============================================================
 # VIM CONFIG
@@ -133,12 +159,9 @@ fields=0 48 17 18 38 39 40 2 46 47 49 1
 sort_key=46
 sort_direction=1
 tree_view=0
-tree_view_always_by_pid=0
-all_branches_collapsed=0
 hide_threads=0
 hide_kernel_threads=0
 hide_userland_threads=0
-shadow_other_users=0
 show_program_path=1
 highlight_base_name=0
 highlight_megabytes=1
@@ -148,9 +171,6 @@ highlight_changes_delay_secs=5
 show_cpu_usage=1
 show_cpu_frequency=0
 show_cpu_temperature=0
-tree_view_cpu_usage=0
-update_process_names=0
-account_guest_in_cpu_meter=1
 color_scheme=0
 enable_mouse=0
 delay=15
@@ -161,29 +181,21 @@ right_meter_modes=1 2 2 2
 EOF
 
 # ============================================================
-# FIREWALL (firewalld sur Fedora, ufw optionnel)
+# FIREWALL (firewalld natif Fedora)
 # ============================================================
 print_info "Configuration du firewall (firewalld)..."
-systemctl enable --now firewalld
-firewall-cmd --permanent --add-service=ssh
-firewall-cmd --permanent --add-service=http
-firewall-cmd --permanent --add-service=https
-firewall-cmd --reload
-# ufw aussi si installé
-if command -v ufw &>/dev/null; then
-    ufw default deny incoming
-    ufw default allow outgoing
-    ufw allow ssh
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-fi
+systemctl enable --now firewalld 2>/dev/null || true
+firewall-cmd --permanent --add-service=ssh   2>/dev/null || true
+firewall-cmd --permanent --add-service=http  2>/dev/null || true
+firewall-cmd --permanent --add-service=https 2>/dev/null || true
+firewall-cmd --reload 2>/dev/null || true
 
 # ============================================================
 # FAIL2BAN
 # ============================================================
 print_info "Configuration de fail2ban..."
-systemctl enable fail2ban
-systemctl start fail2ban
+systemctl enable fail2ban 2>/dev/null || true
+systemctl start  fail2ban 2>/dev/null || true
 
 # ============================================================
 # OPTIMISATIONS SYSTÈME
@@ -208,14 +220,18 @@ net.ipv4.tcp_syncookies = 1
 net.ipv4.ip_forward = 1
 EOF
 
-sysctl -p
+sysctl -p 2>/dev/null || true
 
 # ============================================================
 # ALIAS BASH
 # ============================================================
 print_info "Création des alias..."
-cat >>"/home/$SUDO_USER/.bashrc" <<'EOF'
+BASHRC_TARGET="/home/$SUDO_USER/.bashrc"
+[ -z "$SUDO_USER" ] && BASHRC_TARGET="$HOME/.bashrc"
 
+cat >>"$BASHRC_TARGET" <<'EOF'
+
+# === Alias Fedora post-install ===
 alias ll='ls -alF'
 alias la='ls -A'
 alias l='ls -CF'
@@ -234,56 +250,45 @@ alias mkdir='mkdir -pv'
 alias ..='cd ..'
 alias ...='cd ../..'
 alias grep='grep --color=auto'
-alias diff='colordiff'
 alias tree='tree -C'
 alias htop='htop -C'
 alias editp='gnome-text-editor'
-alias fetch='neofetch'
+alias fetch='fastfetch'
 alias cls='clear'
 alias v='nvim'
 
 histdel() {
-    history -c
-    history -w
+    history -c; history -w
     rm -f ~/.bash_history
     source ~/.bashrc
 }
 
 alias logout='gnome-session-quit --logout --no-prompt'
 
-if command -v bat &> /dev/null; then
-    alias cat='bat'
-fi
+if command -v bat &>/dev/null; then alias cat='bat'; fi
 
-if command -v eza &> /dev/null; then
+if command -v eza &>/dev/null; then
     alias ls='eza --icons'
     alias ll='eza -l --icons'
     alias la='eza -la --icons'
     alias tree='eza --tree --icons'
 fi
 
-if command -v duf &> /dev/null; then
-    alias df='duf'
-fi
+if command -v duf &>/dev/null; then alias df='duf'; fi
 
-mkcd() {
-    mkdir -p "$1" && cd "$1"
-}
+mkcd() { mkdir -p "$1" && cd "$1"; }
 
 ex() {
-    if [ -f $1 ]; then
+    if [ -f "$1" ]; then
         case $1 in
-            *.tar.bz2) tar xjf $1 ;;
-            *.tar.gz) tar xzf $1 ;;
-            *.bz2) bunzip2 $1 ;;
-            *.rar) unrar e $1 ;;
-            *.gz) gunzip $1 ;;
-            *.tar) tar xf $1 ;;
-            *.tbz2) tar xjf $1 ;;
-            *.tgz) tar xzf $1 ;;
-            *.zip) unzip $1 ;;
-            *.Z) uncompress $1 ;;
-            *.7z) 7z x $1 ;;
+            *.tar.bz2) tar xjf "$1" ;;
+            *.tar.gz)  tar xzf "$1" ;;
+            *.bz2)     bunzip2 "$1" ;;
+            *.rar)     unrar e "$1" ;;
+            *.gz)      gunzip "$1"  ;;
+            *.tar)     tar xf "$1"  ;;
+            *.zip)     unzip "$1"   ;;
+            *.7z)      7z x "$1"    ;;
             *) echo "'$1' ne peut pas être extrait" ;;
         esac
     else
@@ -296,31 +301,13 @@ EOF
 # NETTOYAGE
 # ============================================================
 print_info "Nettoyage..."
-dnf clean all
-dnf autoremove -y
-
-print_info "Installation terminée !"
-echo -e "${GREEN}================================${NC}"
-echo -e "${GREEN}Paquets installés :${NC}"
-echo -e "${YELLOW}• VIM + Neovim${NC}"
-echo -e "${YELLOW}• HTOP${NC}"
-echo -e "${YELLOW}• Git, Curl, Wget${NC}"
-echo -e "${YELLOW}• Build tools (gcc, make, kernel-devel)${NC}"
-echo -e "${YELLOW}• Outils réseau et sécurité${NC}"
-echo -e "${YELLOW}• Utilitaires système${NC}"
-echo -e "${YELLOW}• Neofetch${NC}"
-echo -e "${YELLOW}• WezTerm${NC}"
-echo ""
-echo -e "${GREEN}Optimisations :${NC}"
-echo -e "${YELLOW}• Configuration VIM${NC}"
-echo -e "${YELLOW}• Configuration HTOP${NC}"
-echo -e "${YELLOW}• Limites système augmentées${NC}"
-echo -e "${YELLOW}• Optimisations réseau${NC}"
-echo -e "${YELLOW}• Aliases bash pratiques${NC}"
-echo ""
-echo -e "${GREEN}Recommandations :${NC}"
-echo -e "${YELLOW}• Redémarrez votre session pour profiter des alias${NC}"
-echo -e "${YELLOW}• Firewall firewalld déjà actif${NC}"
-echo -e "${GREEN}================================${NC}"
+dnf clean all 2>/dev/null || true
+dnf autoremove -y 2>/dev/null || true
 
 print_info "Post-installation Fedora terminée avec succès !"
+echo -e "${GREEN}================================${NC}"
+echo -e "${GREEN}Recommandations :${NC}"
+echo -e "${YELLOW}• Redémarrez la session pour activer les alias${NC}"
+echo -e "${YELLOW}• Firewall firewalld déjà actif${NC}"
+echo -e "${YELLOW}• Lancez nvim_tmux_setup-fedora.sh pour LazyVim + Tmux${NC}"
+echo -e "${GREEN}================================${NC}"
