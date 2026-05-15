@@ -60,7 +60,7 @@ dnf_install_safe \
     libudev-devel pciutils-devel llvm \
     zstd lzop sassc xclip xsel nodejs npm \
     unrar fastfetch gnome-shell-extension-dash-to-dock \
-    redhat-fonts
+    redhat-mono-fonts redhat-mono-vf-fonts
 
 print_info "Installation de micro..."
 if command -v micro &>/dev/null; then
