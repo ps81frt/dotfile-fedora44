@@ -1,10 +1,5 @@
 #!/bin/bash
 # postinstall-fedora.sh - Script d'optimisation post-installation Fedora
-# Adapté depuis la version Ubuntu/Debian
-
-# Pas de set -e : dnf5 retourne une erreur si un paquet est déjà installé,
-# ce qui tuerait le script. On gère les erreurs manuellement.
-
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -21,7 +16,6 @@ fi
 
 print_info "Début de la post-installation Fedora..."
 
-# Installe un paquet seulement s'il n'est pas déjà présent
 dnf_install_safe() {
     for pkg in "$@"; do
         if dnf list --installed "$pkg" &>/dev/null 2>&1; then
@@ -67,7 +61,6 @@ dnf_install_safe \
     zstd lzop sassc xclip xsel nodejs npm \
     unrar fastfetch
 
-# micro - pas de snap sur Fedora, on prend le binaire officiel
 print_info "Installation de micro..."
 if command -v micro &>/dev/null; then
     print_ok "micro déjà installé."
@@ -101,7 +94,7 @@ else
          print_warning "WezTerm non installé.")
 fi
 
-WEZTERM_CONFIG_URL="https://raw.githubusercontent.com/ps81frt/dotfile-ubuntu/refs/heads/main/wezterm.lua"
+WEZTERM_CONFIG_URL="https://raw.githubusercontent.com/ps81frt/dotfile-fedora44/refs/heads/main/wezterm.lua"
 curl -fsSL "$WEZTERM_CONFIG_URL" -o /tmp/wezterm.lua 2>/dev/null && {
     mkdir -p /root/.config/wezterm
     cp /tmp/wezterm.lua /root/.config/wezterm/wezterm.lua
