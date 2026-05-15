@@ -3,7 +3,7 @@
 # Adapté pour Fedora depuis la version Ubuntu
 # Usage : sudo bash nvim_tmux_setup-fedora.sh
 
-set -e
+# Pas de set -e : on gère les erreurs manuellement pour ne pas bloquer
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,10 +31,61 @@ print_info "Installation pour : $REAL_USER ($REAL_HOME)"
 # 1. DEPENDANCES
 # ============================================================
 print_step "Installation des dependances systeme (dnf)..."
-dnf install -y \
-    neovim tmux git curl wget ripgrep fd-find fzf tree \
-    nodejs npm python3 python3-pip python3-virtualenv python3-pynvim \
+
+# Installation paquet par paquet pour éviter l'échec global (dnf5 sur Fedora 41+)
+dnf_install_safe() {
+    for pkg in "$@"; do
+        if dnf list --installed "$pkg" &>/dev/null; then
+            print_info "$pkg : déjà installé, ignoré."
+        else
+            print_info "Installation de $pkg..."
+            dnf install -y "$pkg" 2>/dev/null || print_warning "$pkg : non disponible, ignoré."
+        fi
+    done
+}
+
+dnf_install_safe \
+    tmux git curl wget ripgrep fd-find fzf tree \
+    nodejs npm python3 python3-pip python3-virtualenv \
     make gcc gcc-c++ unzip xclip xsel
+
+# python3-pynvim : nom variable selon version Fedora
+print_info "Installation de python3-pynvim / pynvim..."
+dnf install -y python3-pynvim 2>/dev/null || \
+    pip3 install pynvim --break-system-packages 2>/dev/null || \
+    pip3 install pynvim 2>/dev/null || \
+    print_warning "pynvim non installé (non bloquant)."
+
+# ---- NEOVIM ----
+# 1. repo Fedora standard
+if ! command -v nvim &>/dev/null; then
+    print_info "Installation neovim depuis les repos Fedora..."
+    dnf install -y neovim 2>/dev/null || true
+fi
+# 2. COPR neovim-nightly
+if ! command -v nvim &>/dev/null; then
+    print_warning "neovim absent des repos standard, tentative COPR..."
+    dnf copr enable -y agriffis/neovim-nightly 2>/dev/null || true
+    dnf install -y neovim 2>/dev/null || true
+fi
+# 3. Tarball officiel GitHub (toujours disponible)
+if ! command -v nvim &>/dev/null; then
+    print_warning "Fallback : installation Neovim via tarball officiel GitHub..."
+    curl -fsSL https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz \
+        -o /tmp/nvim.tar.gz
+    mkdir -p /opt
+    tar -xzf /tmp/nvim.tar.gz -C /opt/
+    ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
+    rm -f /tmp/nvim.tar.gz
+    print_info "Neovim installé → /usr/local/bin/nvim"
+fi
+
+if command -v nvim &>/dev/null; then
+    print_info "Neovim OK : $(nvim --version | head -1)"
+else
+    print_error "Neovim introuvable après toutes les tentatives. Abandon."
+    exit 1
+fi
 
 # ============================================================
 # 2. SHELLCHECK
@@ -444,17 +495,77 @@ fi
 # ============================================================
 cat >/usr/local/bin/install-lsp-servers <<'LSPEOF'
 #!/bin/bash
+set -e
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}[OK]${NC}  $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+err()  { echo -e "${RED}[ERR]${NC}  $1"; }
+
 echo "=== Installation des serveurs LSP ==="
-pip install python-lsp-server pylsp-mypy pylsp-black --break-system-packages 2>/dev/null || \
-    pip install python-lsp-server pylsp-mypy pylsp-black
-npm install -g typescript typescript-language-server
-npm install -g vscode-langservers-extracted
-npm install -g bash-language-server
-npm install -g yaml-language-server
-# lua-language-server sur Fedora
-dnf install -y lua-language-server 2>/dev/null || \
-    echo "lua-language-server non trouvé dans dnf, ignoré."
+
+# --- Python LSP ---
+echo "→ Python LSP..."
+pip install \
+    python-lsp-server \
+    pylsp-mypy \
+    python-lsp-black \
+    python-lsp-ruff \
+    --break-system-packages 2>/dev/null \
+|| pip install \
+    python-lsp-server \
+    pylsp-mypy \
+    python-lsp-black \
+    python-lsp-ruff \
+|| warn "Certains paquets Python LSP non installés."
+ok "Python LSP"
+
+# --- TypeScript / JS ---
+echo "→ TypeScript LSP..."
+npm install -g typescript typescript-language-server && ok "typescript-language-server" || warn "typescript-language-server échoué"
+
+# --- HTML / CSS / JSON ---
+echo "→ HTML/CSS/JSON LSP..."
+npm install -g vscode-langservers-extracted && ok "vscode-langservers-extracted" || warn "vscode-langservers-extracted échoué"
+
+# --- Bash ---
+echo "→ Bash LSP..."
+npm install -g bash-language-server && ok "bash-language-server" || warn "bash-language-server échoué"
+
+# --- YAML ---
+echo "→ YAML LSP..."
+npm install -g yaml-language-server && ok "yaml-language-server" || warn "yaml-language-server échoué"
+
+# --- Lua ---
+echo "→ Lua LSP..."
+# lua-language-server n'est pas dans les repos Fedora standard
+# On le télécharge depuis GitHub releases
+LUA_LS_VERSION="3.13.9"
+LUA_LS_URL="https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/lua-language-server-${LUA_LS_VERSION}-linux-x64.tar.gz"
+LUA_LS_DIR="/opt/lua-language-server"
+
+if command -v lua-language-server &>/dev/null; then
+    ok "lua-language-server déjà installé."
+else
+    mkdir -p "$LUA_LS_DIR"
+    curl -fsSL "$LUA_LS_URL" -o /tmp/lua-ls.tar.gz && \
+    tar -xzf /tmp/lua-ls.tar.gz -C "$LUA_LS_DIR" && \
+    rm -f /tmp/lua-ls.tar.gz && \
+    ln -sf "$LUA_LS_DIR/bin/lua-language-server" /usr/local/bin/lua-language-server && \
+    ok "lua-language-server installé → /usr/local/bin/lua-language-server" || \
+    warn "lua-language-server : échec du téléchargement."
+fi
+
+echo ""
 echo "=== Done ! ==="
+echo ""
+echo "LSP disponibles :"
+for cmd in pylsp typescript-language-server bash-language-server yaml-language-server lua-language-server; do
+    if command -v "$cmd" &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} $cmd"
+    else
+        echo -e "  ${RED}✗${NC} $cmd"
+    fi
+done
 LSPEOF
 chmod +x /usr/local/bin/install-lsp-servers
 
