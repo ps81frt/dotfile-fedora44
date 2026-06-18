@@ -79,7 +79,8 @@ mkdir -p /usr/local/share/fonts
 curl -fsSL https://github.com/ryanoasis/nerd-fonts/raw/master/patched-fonts/Hack/Regular/HackNerdFontMono-Regular.ttf \
     -o /usr/local/share/fonts/HackNerdFontMono-Regular.ttf && fc-cache -fv \
     || print_warning "HackNerdFont : échec du téléchargement."
-dnf install redhat-display-fonts redhat-text-fonts
+dnf install redhat-display-fonts redhat-text-fonts jetbrains-mono-fonts-all.noarch
+
 # ============================================================
 # WEZTERM via COPR
 # ============================================================
